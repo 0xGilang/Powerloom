@@ -2,7 +2,7 @@ version: '3.9'
 
 services:
   audit-protocol:
-    image: ghcr.io/powerloom/audit-protocol:latest
+    image: ghcr.io/powerloom/audit-protocol:testnet_5_pairs
     expose:
       - 9000
       - 9002
@@ -13,11 +13,12 @@ services:
       - 9030:9030
     depends_on:
       redis:
-         condition: service_healthy
+        condition: service_healthy
       rabbitmq:
-         condition: service_healthy
+        condition: service_healthy
     volumes:
       - local_cache:/home/ubuntu/local_cache/
+      - ./logs/audit-protocol:/root/.pm2/logs
     links:
       - "ipfs"
       - "redis"
@@ -44,7 +45,7 @@ services:
       bash -c "sh snapshotter_autofill.sh && sh init_processes.sh"
 
   pooler:
-    image: ghcr.io/powerloom/pooler:latest
+    image: ghcr.io/powerloom/pooler:testnet_5_pairs
     depends_on:
       audit-protocol:
         condition: service_healthy
@@ -60,6 +61,7 @@ services:
       - 8555:8555
     volumes:
       - local_cache:/home/ubuntu/local_cache/
+      - ./logs/pooler:/logs
     environment:
       - SIGNER_ACCOUNT_ADDRESS=$SIGNER_ACCOUNT_ADDRESS
       - SOURCE_RPC_URL=$SOURCE_RPC_URL
@@ -71,7 +73,7 @@ services:
       - SLACK_REPORTING_URL=$SLACK_REPORTING_URL
       - POWERLOOM_REPORTING_URL=$POWERLOOM_REPORTING_URL
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health", "||", "exit", "1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -80,7 +82,7 @@ services:
       bash -c "sh snapshotter_autofill.sh && sh init_processes.sh"
 
   pooler-frontend:
-    image: ghcr.io/powerloom/pooler-frontend:latest
+    image: ghcr.io/powerloom/pooler-frontend:testnet_5_pairs
     depends_on:
       pooler:
         condition: service_healthy
@@ -98,21 +100,23 @@ services:
       start_period: 20s
 
   redis:
-    command: ["redis-server"]
-    image: "redis"
+    command: redis-server --appendonly yes
+    image: "redis:alpine"
     expose:
       - 6379
     ports:
       - 6379:6379
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 30s
+
   rabbitmq:
     image: rabbitmq:3-management
-    #command: ["daemon"]
+    environment:
+      - RABBITMQ_HIPE_COMPILE=1
     expose:
       - 15672
       - 5672
@@ -120,11 +124,12 @@ services:
       - 5672:5672
       - 15672:15672
     healthcheck:
-      test: rabbitmq-diagnostics check_port_connectivity
+      test: rabbitmq-diagnostics check_port_connectivity || exit 1
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 30s
+
   ipfs:
     image: ipfs/kubo:release
     profiles: ["ipfs"]
@@ -140,11 +145,10 @@ services:
       echo 'starting ipfs';
       /sbin/tini -- /usr/local/bin/start_ipfs daemon --migrate=true --agent-version-suffix=docker;
       "
-    #command:
-    #   ["daemon", "--migrate=true", "--agent-version-suffix=docker"]
     expose:
       - 5001
     ports:
       - 5001:5001
+
 volumes:
   local_cache:
